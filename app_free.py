@@ -9,9 +9,9 @@ from flask import Flask, render_template_string
 
 app = Flask(__name__)
 
-# Konfigurasi API Key Master & Football-Data
-GEMINI_API_KEY = "MASUKKAN_MASTER_GEMINI_API_KEY_ANDA"
-FOOTBALL_DATA_API_KEY = "MASUKKAN_FOOTBALL_DATA_API_KEY_ANDA"
+# Mengambil API Key secara aman dari Environment Variables server (Render)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 DATA_FILE = "daily_predictions.json"
