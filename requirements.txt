@@ -2,3 +2,4 @@ flask
 requests
 ddgs
 google-genai
+gunicorn
