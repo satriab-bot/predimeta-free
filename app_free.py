@@ -235,7 +235,10 @@ def index():
             
     return render_template_string(HTML_TEMPLATE, predictions=predictions)
 
+import os
+
 if __name__ == "__main__":
-    # Catatan: Di server produksi, fungsi fetch_and_generate_predictions() 
-    # bisa dipicu menggunakan APScheduler atau sistem Cron eksternal tepat pukul 10:30 WIB.
-    app.run(debug=True, port=5000)
+    # Mengambil port dari environment Render secara otomatis, default ke 5000 jika dijalankan lokal
+    port = int(os.environ.get("PORT", 5000))
+    # Wajib binding ke "0.0.0.0" agar bisa diakses oleh publik Render
+    app.run(host="0.0.0.0", port=port)
