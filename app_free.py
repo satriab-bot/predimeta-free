@@ -141,10 +141,10 @@ def index():
             .meta { font-size: 11px; color: #777; margin-bottom: 8px; }
             .analysis { font-size: 13px; line-height: 1.4; color: #444; background: #f9f9f9; padding: 8px; border-radius: 4px; white-space: pre-line; }
             .update-info { font-size: 10px; color: #888; text-align: right; margin-bottom: 10px; }
-            .empty-msg { font-size: 13px; color: #666; background: #fff; padding: 15px; border-radius: 8px; text-align: center; border: 1px dashed #ccc; }
+            .empty-msg { font-size: 12px; color: #555; background: #fff; padding: 15px; border-radius: 8px; text-align: center; border: 1px dashed #0056b3; line-height: 1.5; }
+            .premium-teaser { font-size: 11px; color: #d9534f; margin-top: 8px; font-weight: bold; }
         </style>
         <script>
-            // Otomatis memicu pengecekan di latar belakang saat pengunjung membuka blog
             window.addEventListener('DOMContentLoaded', (event) => {
                 fetch('/force-update')
                     .then(response => response.json())
@@ -163,8 +163,15 @@ def index():
                 <div class="analysis">{{ p.analysis | safe }}</div>
             </div>
             {% endfor %}
+            <div style="font-size: 10px; text-align: center; color: #777; margin-top: 15px;">
+                Ingin analisis untuk lebih banyak pertandingan dan liga lainnya? <br>Yuk, dukung dan berlangganan <b>PrediMeta Premium</b>! 🚀
+            </div>
         {% else %}
-            <div class="empty-msg">Data sedang disiapkan di latar belakang. Silakan refresh halaman ini dalam beberapa saat.</div>
+            <div class="empty-msg">
+                <b>Memuat Jadwal & Analisis Taktik Harian...</b><br>
+                Sistem sedang meracik data pertandingan terkini. Silakan muat ulang (refresh) halaman ini dalam <b>1 hingga 2 menit ke depan</b>.<br><br>
+                <i>Catatan: Refresh berulang kali tidak akan mengubah hasil analisis untuk hari yang sama. Untuk akses tanpa batas dan cakupan laga yang lebih lengkap, nantikan kehadiran PrediMeta Premium!</i>
+            </div>
         {% endif %}
     </body>
     </html>
