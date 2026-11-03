@@ -14,7 +14,7 @@ FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Fungsi utama dengan pengaman error agar server tidak crash (502)"""
+    """Fungsi murni yang mengambil data asli, tanpa rekayasa data"""
     print("Memulai proses penarikan jadwal...")
     
     today = datetime.now().strftime("%Y-%m-%d")
@@ -34,7 +34,6 @@ def fetch_and_generate_predictions():
         
     predictions_result = []
     
-    # Inisialisasi klien Gemini di dalam fungsi agar aman
     client = None
     if GEMINI_API_KEY:
         try:
@@ -49,8 +48,8 @@ def fetch_and_generate_predictions():
             competition = match.get('competition', {}).get('name', 'League')
             match_time = match.get('utcDate', '')
             
-            # Coba cari data via DDGS, beri fallback jika gagal/timeout
-            context_data = "Data statistik tidak tersedia."
+            # Cari data pendukung asli via DDGS
+            context_data = ""
             try:
                 with DDGS() as ddgs:
                     results = list(ddgs.text(f"{home_team} vs {away_team} preview stats prediction", max_results=2))
@@ -58,7 +57,7 @@ def fetch_and_generate_predictions():
             except Exception:
                 pass
                 
-            ai_output = f"Prediksi: Laga menarik antara {home_team} vs {away_team}."
+            ai_output = "Analisis belum tersedia."
             if client:
                 try:
                     prompt = (
@@ -73,7 +72,7 @@ def fetch_and_generate_predictions():
                     if response and response.text:
                         ai_output = response.text
                 except Exception as ai_err:
-                    ai_output = f"Main Pick: Analisis standar. (AI Error: {str(ai_err)[:50]})"
+                    ai_output = f"Gagal generate AI: {str(ai_err)[:50]}"
                     
             predictions_result.append({
                 "competition": competition,
@@ -83,19 +82,9 @@ def fetch_and_generate_predictions():
                 "analysis": ai_output
             })
         except Exception as m_err:
-            print(f"Error memproses match: {m_err}")
             continue
         
-    # Jika tidak ada pertandingan sama sekali dari API, buat data dummy aman agar web tetap ada isinya
-    if not predictions_result:
-        predictions_result.append({
-            "competition": "Friendly / No Match Today",
-            "home_team": "Jadwal Belum Tersedia",
-            "away_team": "Cek Kembali Nanti",
-            "time": datetime.now().strftime("%Y-%m-%d"),
-            "analysis": "Main Pick: - <br>Reasoning: Tidak ada pertandingan terjadwal dalam rentang waktu ini dari API."
-        })
-
+    # Catat data secara apa adanya (jika kosong, ya kosong)
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -103,7 +92,7 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Berhasil simpan data prediksi!")
+    print("Selesai memperbarui data asli!")
 
 @app.route("/")
 def index():
@@ -131,6 +120,7 @@ def index():
             .meta { font-size: 11px; color: #777; margin-bottom: 8px; }
             .analysis { font-size: 13px; line-height: 1.4; color: #444; background: #f9f9f9; padding: 8px; border-radius: 4px; }
             .update-info { font-size: 10px; color: #888; text-align: right; margin-bottom: 10px; }
+            .empty-msg { font-size: 13px; color: #666; background: #fff; padding: 15px; border-radius: 8px; text-align: center; border: 1px dashed #ccc; }
         </style>
     </head>
     <body>
@@ -144,7 +134,7 @@ def index():
             </div>
             {% endfor %}
         {% else %}
-            <p style="font-size: 13px; color: #666;">Belum ada data prediksi.</p>
+            <div class="empty-msg">Tidak ada jadwal pertandingan utama yang tersedia untuk rentang waktu ini.</div>
         {% endif %}
     </body>
     </html>
@@ -155,7 +145,7 @@ def index():
 def force_update():
     try:
         fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Prediksi berhasil diperbarui tanpa error!"})
+        return jsonify({"status": "success", "message": "Data asli berhasil ditarik!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
