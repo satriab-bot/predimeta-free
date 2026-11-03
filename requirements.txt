@@ -3,4 +3,3 @@ requests
 ddgs
 google-genai
 gunicorn
-apscheduler
