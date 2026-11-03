@@ -15,8 +15,8 @@ FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Fungsi pekerja yang berjalan di latar belakang (background)"""
-    print("Memulai proses latar belakang penarikan jadwal...")
+    """Mengambil jadwal resmi dari API dan menggunakan tanggal pertandingan aslinya untuk kueri DDGS"""
+    print("Memulai proses penarikan jadwal berbasis tanggal resmi API...")
     
     today = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -47,12 +47,18 @@ def fetch_and_generate_predictions():
             home_team = match.get('homeTeam', {}).get('name', 'Home')
             away_team = match.get('awayTeam', {}).get('name', 'Away')
             competition = match.get('competition', {}).get('name', 'League')
-            match_time = match.get('utcDate', '')
+            
+            # AMBIL TANGGAL RESMI LANGSUNG DARI API FOOTBALL-DATA
+            utc_date_str = match.get('utcDate', '') # Contoh: "2026-11-03T17:45:00Z"
+            match_date = utc_date_str.split('T')[0] if 'T' in utc_date_str else datetime.now().strftime("%Y-%m-%d")
+            
+            # Kueri DDGS secara presisi mengunci tanggal resmi dari API tersebut
+            search_query = f"{home_team} vs {away_team} preview news {match_date}"
             
             context_data = ""
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats prediction", max_results=2))
+                    results = list(ddgs.text(search_query, max_results=3))
                     context_data = " ".join([r.get('body', '') for r in results])
             except Exception:
                 pass
@@ -61,12 +67,14 @@ def fetch_and_generate_predictions():
             if client:
                 try:
                     prompt = (
-                        f"Bertindaklah sebagai analis sepak bola profesional. "
-                        f"Berikan analisis taktik singkat untuk pertandingan bola: {home_team} vs {away_team} di kompetisi {competition}. "
-                        f"Fokuskan pada performa terkini. "
+                        f"Bertindaklah sebagai analis sepak bola profesional yang akurat. "
+                        f"Analisis pertandingan resmi ini: {home_team} vs {away_team} di kompetisi {competition}, "
+                        f"yang dijadwalkan bertanding pada tanggal {match_date}. "
+                        f"Gunakan data referensi berita terkini berikut: {context_data}. "
+                        f"PENTING: Pastikan susunan tim, pelatih, dan kondisi skuad akurat untuk laga pada tanggal {match_date} tersebut dan abaikan arsip berita lama yang tidak relevan. "
                         f"Gunakan format wajib: "
                         f"Main Pick: [Pilihan Anda] "
-                        f"Reasoning: [Alasan taktis 1-2 kalimat saja]."
+                        f"Reasoning: [Alasan taktis berdasarkan skuad terkini, 1-2 kalimat saja]."
                     )
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
@@ -81,7 +89,7 @@ def fetch_and_generate_predictions():
                 "competition": competition,
                 "home_team": home_team,
                 "away_team": away_team,
-                "time": match_time,
+                "time": utc_date_str,
                 "analysis": ai_output
             })
         except Exception as m_err:
@@ -94,7 +102,7 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Proses latar belakang selesai, data berhasil disimpan!")
+    print("Selesai memperbarui data dengan tanggal referensi resmi API!")
 
 @app.route("/")
 def index():
@@ -145,14 +153,12 @@ def index():
 
 @app.route("/force-update")
 def force_update():
-    """Langsung merespons instan tanpa menunggu proses AI selesai agar bebas dari Error 502"""
     try:
-        # Jalankan fungsi di latar belakang (Thread terpisah)
         thread = threading.Thread(target=fetch_and_generate_predictions)
         thread.start()
         return jsonify({
             "status": "success", 
-            "message": "Perintah diterima! Data sedang diperbarui di latar belakang. Silakan tunggu 1 menit lalu refresh halaman utama."
+            "message": "Perintah diterima! Sinkronisasi berbasis tanggal resmi API sedang diproses di latar belakang."
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
