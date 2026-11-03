@@ -14,7 +14,7 @@ FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Fungsi murni yang mengambil data asli, tanpa rekayasa data"""
+    """Mengambil data dengan batasan ketat agar tidak timeout (502)"""
     print("Memulai proses penarikan jadwal...")
     
     today = datetime.now().strftime("%Y-%m-%d")
@@ -25,12 +25,12 @@ def fetch_and_generate_predictions():
     
     matches = []
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=8)
         if response.status_code == 200:
             data = response.json()
             matches = data.get("matches", [])
     except Exception as e:
-        print(f"Error mengambil jadwal dari football-data: {e}")
+        print(f"Error mengambil jadwal: {e}")
         
     predictions_result = []
     
@@ -39,20 +39,20 @@ def fetch_and_generate_predictions():
         try:
             client = genai.Client(api_key=GEMINI_API_KEY)
         except Exception as e:
-            print(f"Gagal init Gemini client: {e}")
+            print(f"Gagal init Gemini: {e}")
 
-    for match in matches[:5]:
+    # Batasi HANYA 1 pertandingan dulu agar proses sangat cepat dan tidak timeout
+    for match in matches[:1]:
         try:
             home_team = match.get('homeTeam', {}).get('name', 'Home')
             away_team = match.get('awayTeam', {}).get('name', 'Away')
             competition = match.get('competition', {}).get('name', 'League')
             match_time = match.get('utcDate', '')
             
-            # Cari data pendukung asli via DDGS
             context_data = ""
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats prediction", max_results=2))
+                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats", max_results=1))
                     context_data = " ".join([r.get('body', '') for r in results])
             except Exception:
                 pass
@@ -60,11 +60,7 @@ def fetch_and_generate_predictions():
             ai_output = "Analisis belum tersedia."
             if client:
                 try:
-                    prompt = (
-                        f"Analisis singkat bola: {home_team} vs {away_team} ({competition}). "
-                        f"Info: {context_data}. "
-                        f"Format ringkas: Main Pick dan Reasoning (1-2 kalimat saja)."
-                    )
+                    prompt = f"Analisis singkat bola: {home_team} vs {away_team} ({competition}). Info: {context_data}. Format ringkas: Main Pick dan Reasoning (1-2 kalimat)."
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
                         contents=prompt
@@ -72,7 +68,7 @@ def fetch_and_generate_predictions():
                     if response and response.text:
                         ai_output = response.text
                 except Exception as ai_err:
-                    ai_output = f"Gagal generate AI: {str(ai_err)[:50]}"
+                    ai_output = f"Gagal generate AI."
                     
             predictions_result.append({
                 "competition": competition,
@@ -81,10 +77,9 @@ def fetch_and_generate_predictions():
                 "time": match_time,
                 "analysis": ai_output
             })
-        except Exception as m_err:
+        except Exception:
             continue
         
-    # Catat data secara apa adanya (jika kosong, ya kosong)
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -92,7 +87,7 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Selesai memperbarui data asli!")
+    print("Selesai memperbarui data!")
 
 @app.route("/")
 def index():
@@ -145,7 +140,7 @@ def index():
 def force_update():
     try:
         fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Data asli berhasil ditarik!"})
+        return jsonify({"status": "success", "message": "Data berhasil ditarik dengan cepat!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
