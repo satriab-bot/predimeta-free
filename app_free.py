@@ -15,10 +15,8 @@ FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions(force=False):
-    """Mengambil data hanya jika hari ini belum pernah diperbarui atau dipaksa (force)"""
     today = datetime.now().strftime("%Y-%m-%d")
     
-    # Cek apakah hari ini sudah pernah di-generate untuk menghemat kuota Gemini
     if not force and os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -30,7 +28,7 @@ def fetch_and_generate_predictions(force=False):
         except:
             pass
 
-    print("Memulai proses penarikan jadwal dan analisis AI harian...")
+    print("Memulai proses penarikan jadwal dan analisis taktik murni...")
     
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     
@@ -78,14 +76,16 @@ def fetch_and_generate_predictions(force=False):
             ai_output = "Analisis taktik belum tersedia."
             if client:
                 try:
+                    # PROMPT DIPERKETAT: 100% Bebas istilah bursa taruhan (Asian Handicap, Over/Under, DNB, dll)
                     prompt = (
-                        f"Bertindaklah sebagai analis taktik sepak bola profesional. "
-                        f"Berikan analisis pertandingan antara {home_team} vs {away_team} di kompetisi {competition}. "
+                        f"Bertindaklah sebagai pengamat dan analis taktik sepak bola murni. "
+                        f"Berikan prediksi hasil dan analisis pertandingan antara {home_team} vs {away_team} di kompetisi {competition}. "
                         f"Gunakan referensi ringkas berikut: {context_data}. "
-                        f"PENTING: Abaikan batasan waktu, buat analisis taktik berdasarkan kondisi terkini kedua tim secara objektif. "
-                        f"Jangan menuliskan kalimat penolakan atau komentar tentang kebijakan. Langsung berikan format wajib: "
-                        f"Main Pick: [Pilihan Anda] "
-                        f"Reasoning: [Alasan taktis 1-2 kalimat saja]."
+                        f"ATURAN MUTLAK BAHASA: DILARANG KERAS menggunakan istilah perjudian seperti 'Asian Handicap', 'Over/Under', 'Draw No Bet', 'Double Chance', 'Odds', atau istilah bursa taruhan lainnya. "
+                        f"Gunakan bahasa olahraga murni. Untuk 'Main Pick', gunakan format narasi umum seperti '[Nama Tim] diprediksi menang tipis', 'Peluang imbang terbuka', atau deskripsi gol seperti 'pertandingan diprediksi minim gol' atau 'potensi tercipta banyak gol'. "
+                        f"Gunakan format wajib: "
+                        f"Main Pick: [Prediksi hasil murni tanpa istilah judi] "
+                        f"Reasoning: [Alasan taktis berdasarkan performa tim, 1-2 kalimat saja]."
                     )
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
@@ -94,7 +94,7 @@ def fetch_and_generate_predictions(force=False):
                     if response and response.text:
                         ai_output = response.text
                 except Exception as ai_err:
-                    ai_output = f"Main Pick: - <br>Reasoning: Gagal memproses analisis AI."
+                    ai_output = f"Main Pick: Pertandingan berjalan ketat<br>Reasoning: Gagal memproses analisis AI."
                     
             predictions_result.append({
                 "competition": competition,
@@ -113,7 +113,7 @@ def fetch_and_generate_predictions(force=False):
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Selesai memperbarui data hari ini!")
+    print("Selesai memperbarui data dengan bahasa murni non-judi!")
 
 @app.route("/")
 def index():
@@ -164,13 +164,13 @@ def index():
             </div>
             {% endfor %}
             <div style="font-size: 10px; text-align: center; color: #777; margin-top: 15px;">
-                Ingin analisis untuk lebih banyak pertandingan dan liga lainnya? <br>Yuk, dukung dan berlangganan <b>PrediMeta Premium</b>! 🚀
+                Ingin analisis taktik mendalam untuk lebih banyak pertandingan? <br>Yuk, dukung dan nantikan kehadiran <b>PrediMeta Premium</b>! 🚀
             </div>
         {% else %}
             <div class="empty-msg">
                 <b>Memuat Jadwal & Analisis Taktik Harian...</b><br>
-                Sistem sedang meracik data pertandingan terkini. Silakan muat ulang (refresh) halaman ini dalam <b>1 hingga 2 menit ke depan</b>.<br><br>
-                <i>Catatan: Refresh berulang kali tidak akan mengubah hasil analisis untuk hari yang sama. Untuk akses tanpa batas dan cakupan laga yang lebih lengkap, nantikan kehadiran PrediMeta Premium!</i>
+                Sistem sedang meracik ulasan pertandingan terkini. Silakan muat ulang (refresh) halaman ini dalam <b>1 hingga 2 menit ke depan</b>.<br><br>
+                <i>Catatan: Refresh berulang kali tidak akan mengubah hasil analisis untuk hari yang sama. Untuk akses penuh dan cakupan laga yang lebih luas, silakan berlangganan PrediMeta Premium!</i>
             </div>
         {% endif %}
     </body>
@@ -181,7 +181,6 @@ def index():
 @app.route("/force-update")
 def force_update():
     try:
-        # Jalankan di latar belakang dengan mode aman (tidak force kecuali tanggal beda)
         thread = threading.Thread(target=fetch_and_generate_predictions)
         thread.start()
         return jsonify({
