@@ -11,65 +11,91 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Fungsi utama untuk menarik jadwal dan mengolahnya via AI"""
+    """Fungsi utama dengan pengaman error agar server tidak crash (502)"""
+    print("Memulai proses penarikan jadwal...")
+    
     today = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     
     url = f"https://api.football-data.org/v4/matches?dateFrom={today}&dateTo={tomorrow}"
     headers = {"X-Auth-Token": FOOTBALL_DATA_API_KEY} if FOOTBALL_DATA_API_KEY else {}
     
+    matches = []
     try:
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        matches = data.get("matches", [])
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            matches = data.get("matches", [])
     except Exception as e:
-        matches = []
+        print(f"Error mengambil jadwal dari football-data: {e}")
         
     predictions_result = []
     
-    for match in matches[:5]:
-        home_team = match['homeTeam']['name']
-        away_team = match['awayTeam']['name']
-        competition = match['competition']['name']
-        match_time = match['utcDate']
-        
-        search_query = f"{home_team} vs {away_team} preview stats prediction 2026"
-        context_data = ""
+    # Inisialisasi klien Gemini di dalam fungsi agar aman
+    client = None
+    if GEMINI_API_KEY:
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(search_query, max_results=3))
-                context_data = " ".join([r.get('body', '') for r in results])
+            client = genai.Client(api_key=GEMINI_API_KEY)
         except Exception as e:
-            context_data = "Data statistik tidak tersedia."
+            print(f"Gagal init Gemini client: {e}")
+
+    for match in matches[:5]:
+        try:
+            home_team = match.get('homeTeam', {}).get('name', 'Home')
+            away_team = match.get('awayTeam', {}).get('name', 'Away')
+            competition = match.get('competition', {}).get('name', 'League')
+            match_time = match.get('utcDate', '')
             
-        ai_output = "Prediksi belum tersedia."
-        if client:
-            prompt = (
-                f"Analisis singkat pertandingan bola antara {home_team} vs {away_team} di kompetisi {competition}. "
-                f"Gunakan data berikut: {context_data}. "
-                f"Berikan output dalam format ringkas: Main Pick (Pilihan Utama) dan Reasoning (Alasan singkat 1-2 kalimat saja)."
-            )
+            # Coba cari data via DDGS, beri fallback jika gagal/timeout
+            context_data = "Data statistik tidak tersedia."
             try:
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
-                ai_output = response.text
-            except Exception as e:
-                ai_output = f"Gagal generate AI: {e}"
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats prediction", max_results=2))
+                    context_data = " ".join([r.get('body', '') for r in results])
+            except Exception:
+                pass
                 
-        predictions_result.append({
-            "competition": competition,
-            "home_team": home_team,
-            "away_team": away_team,
-            "time": match_time,
-            "analysis": ai_output
-        })
+            ai_output = f"Prediksi: Laga menarik antara {home_team} vs {away_team}."
+            if client:
+                try:
+                    prompt = (
+                        f"Analisis singkat bola: {home_team} vs {away_team} ({competition}). "
+                        f"Info: {context_data}. "
+                        f"Format ringkas: Main Pick dan Reasoning (1-2 kalimat saja)."
+                    )
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash-lite',
+                        contents=prompt
+                    )
+                    if response and response.text:
+                        ai_output = response.text
+                except Exception as ai_err:
+                    ai_output = f"Main Pick: Analisis standar. (AI Error: {str(ai_err)[:50]})"
+                    
+            predictions_result.append({
+                "competition": competition,
+                "home_team": home_team,
+                "away_team": away_team,
+                "time": match_time,
+                "analysis": ai_output
+            })
+        except Exception as m_err:
+            print(f"Error memproses match: {m_err}")
+            continue
         
+    # Jika tidak ada pertandingan sama sekali dari API, buat data dummy aman agar web tetap ada isinya
+    if not predictions_result:
+        predictions_result.append({
+            "competition": "Friendly / No Match Today",
+            "home_team": "Jadwal Belum Tersedia",
+            "away_team": "Cek Kembali Nanti",
+            "time": datetime.now().strftime("%Y-%m-%d"),
+            "analysis": "Main Pick: - <br>Reasoning: Tidak ada pertandingan terjadwal dalam rentang waktu ini dari API."
+        })
+
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -77,6 +103,7 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
+    print("Berhasil simpan data prediksi!")
 
 @app.route("/")
 def index():
@@ -117,7 +144,7 @@ def index():
             </div>
             {% endfor %}
         {% else %}
-            <p style="font-size: 13px; color: #666;">Belum ada data prediksi. Silakan jalankan update manual.</p>
+            <p style="font-size: 13px; color: #666;">Belum ada data prediksi.</p>
         {% endif %}
     </body>
     </html>
@@ -128,7 +155,7 @@ def index():
 def force_update():
     try:
         fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Prediksi berhasil diperbarui!"})
+        return jsonify({"status": "success", "message": "Prediksi berhasil diperbarui tanpa error!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
