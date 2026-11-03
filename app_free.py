@@ -8,13 +8,14 @@ from flask import Flask, render_template_string, jsonify
 
 app = Flask(__name__)
 
+# Konfigurasi API Key dari Environment Variables Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Mengambil data dengan batasan ketat agar tidak timeout (502)"""
+    """Fungsi utama untuk menarik hingga 5 jadwal pertandingan dan analisis AI"""
     print("Memulai proses penarikan jadwal...")
     
     today = datetime.now().strftime("%Y-%m-%d")
@@ -25,12 +26,13 @@ def fetch_and_generate_predictions():
     
     matches = []
     try:
-        response = requests.get(url, headers=headers, timeout=8)
+        # Timeout sedikit dilonggarkan ke 15 detik agar stabil
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
             matches = data.get("matches", [])
     except Exception as e:
-        print(f"Error mengambil jadwal: {e}")
+        print(f"Error mengambil jadwal dari football-data: {e}")
         
     predictions_result = []
     
@@ -39,28 +41,37 @@ def fetch_and_generate_predictions():
         try:
             client = genai.Client(api_key=GEMINI_API_KEY)
         except Exception as e:
-            print(f"Gagal init Gemini: {e}")
+            print(f"Gagal init Gemini client: {e}")
 
-    # Batasi HANYA 1 pertandingan dulu agar proses sangat cepat dan tidak timeout
-    for match in matches[:1]:
+    # Batasi maksimal 5 pertandingan sesuai target
+    for match in matches[:5]:
         try:
             home_team = match.get('homeTeam', {}).get('name', 'Home')
             away_team = match.get('awayTeam', {}).get('name', 'Away')
             competition = match.get('competition', {}).get('name', 'League')
             match_time = match.get('utcDate', '')
             
+            # Cari data pendukung via DuckDuckGo Search
             context_data = ""
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats", max_results=1))
+                    results = list(ddgs.text(f"{home_team} vs {away_team} preview stats prediction", max_results=2))
                     context_data = " ".join([r.get('body', '') for r in results])
             except Exception:
                 pass
                 
-            ai_output = "Analisis belum tersedia."
+            ai_output = "Analisis taktik belum tersedia."
             if client:
                 try:
-                    prompt = f"Analisis singkat bola: {home_team} vs {away_team} ({competition}). Info: {context_data}. Format ringkas: Main Pick dan Reasoning (1-2 kalimat)."
+                    # Prompt dikhususkan murni konteks taktik olahraga untuk menghindari salah sensor AI
+                    prompt = (
+                        f"Bertindaklah sebagai analis sepak bola profesional. "
+                        f"Berikan analisis taktik singkat untuk pertandingan bola: {home_team} vs {away_team} di kompetisi {competition}. "
+                        f"Fokuskan pada performa terkini. "
+                        f"Gunakan format wajib: "
+                        f"Main Pick: [Pilihan Anda] "
+                        f"Reasoning: [Alasan taktis 1-2 kalimat saja]."
+                    )
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
                         contents=prompt
@@ -68,7 +79,7 @@ def fetch_and_generate_predictions():
                     if response and response.text:
                         ai_output = response.text
                 except Exception as ai_err:
-                    ai_output = f"Gagal generate AI."
+                    ai_output = f"Main Pick: - <br>Reasoning: Gagal memproses analisis AI."
                     
             predictions_result.append({
                 "competition": competition,
@@ -77,9 +88,11 @@ def fetch_and_generate_predictions():
                 "time": match_time,
                 "analysis": ai_output
             })
-        except Exception:
+        except Exception as m_err:
+            print(f"Gagal memproses salah satu match: {m_err}")
             continue
         
+    # Simpan hasil secara apa adanya ke file JSON
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -87,10 +100,11 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Selesai memperbarui data!")
+    print("Selesai memperbarui data prediksi (maks 5 laga)!")
 
 @app.route("/")
 def index():
+    """Halaman Tampilan Widget untuk Blog"""
     predictions = []
     updated_at = "Belum pernah diperbarui"
     
@@ -113,7 +127,7 @@ def index():
             .card { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 4px solid #0056b3; }
             .match-title { font-weight: bold; font-size: 14px; color: #0056b3; margin-bottom: 4px; }
             .meta { font-size: 11px; color: #777; margin-bottom: 8px; }
-            .analysis { font-size: 13px; line-height: 1.4; color: #444; background: #f9f9f9; padding: 8px; border-radius: 4px; }
+            .analysis { font-size: 13px; line-height: 1.4; color: #444; background: #f9f9f9; padding: 8px; border-radius: 4px; white-space: pre-line; }
             .update-info { font-size: 10px; color: #888; text-align: right; margin-bottom: 10px; }
             .empty-msg { font-size: 13px; color: #666; background: #fff; padding: 15px; border-radius: 8px; text-align: center; border: 1px dashed #ccc; }
         </style>
@@ -138,9 +152,10 @@ def index():
 
 @app.route("/force-update")
 def force_update():
+    """Endpoint untuk memicu pembaruan manual dengan timeout aman"""
     try:
         fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Data berhasil ditarik dengan cepat!"})
+        return jsonify({"status": "success", "message": "Hingga 5 data pertandingan berhasil diperbarui!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
