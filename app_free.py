@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from datetime import datetime, timedelta
 import requests
 from ddgs import DDGS
@@ -8,15 +9,14 @@ from flask import Flask, render_template_string, jsonify
 
 app = Flask(__name__)
 
-# Konfigurasi API Key dari Environment Variables Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Fungsi utama untuk menarik hingga 5 jadwal pertandingan dan analisis AI"""
-    print("Memulai proses penarikan jadwal...")
+    """Fungsi pekerja yang berjalan di latar belakang (background)"""
+    print("Memulai proses latar belakang penarikan jadwal...")
     
     today = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -26,13 +26,12 @@ def fetch_and_generate_predictions():
     
     matches = []
     try:
-        # Timeout sedikit dilonggarkan ke 15 detik agar stabil
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
             matches = data.get("matches", [])
     except Exception as e:
-        print(f"Error mengambil jadwal dari football-data: {e}")
+        print(f"Error mengambil jadwal: {e}")
         
     predictions_result = []
     
@@ -43,7 +42,6 @@ def fetch_and_generate_predictions():
         except Exception as e:
             print(f"Gagal init Gemini client: {e}")
 
-    # Batasi maksimal 5 pertandingan sesuai target
     for match in matches[:5]:
         try:
             home_team = match.get('homeTeam', {}).get('name', 'Home')
@@ -51,7 +49,6 @@ def fetch_and_generate_predictions():
             competition = match.get('competition', {}).get('name', 'League')
             match_time = match.get('utcDate', '')
             
-            # Cari data pendukung via DuckDuckGo Search
             context_data = ""
             try:
                 with DDGS() as ddgs:
@@ -63,7 +60,6 @@ def fetch_and_generate_predictions():
             ai_output = "Analisis taktik belum tersedia."
             if client:
                 try:
-                    # Prompt dikhususkan murni konteks taktik olahraga untuk menghindari salah sensor AI
                     prompt = (
                         f"Bertindaklah sebagai analis sepak bola profesional. "
                         f"Berikan analisis taktik singkat untuk pertandingan bola: {home_team} vs {away_team} di kompetisi {competition}. "
@@ -89,10 +85,8 @@ def fetch_and_generate_predictions():
                 "analysis": ai_output
             })
         except Exception as m_err:
-            print(f"Gagal memproses salah satu match: {m_err}")
             continue
         
-    # Simpan hasil secara apa adanya ke file JSON
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -100,11 +94,10 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Selesai memperbarui data prediksi (maks 5 laga)!")
+    print("Proses latar belakang selesai, data berhasil disimpan!")
 
 @app.route("/")
 def index():
-    """Halaman Tampilan Widget untuk Blog"""
     predictions = []
     updated_at = "Belum pernah diperbarui"
     
@@ -143,7 +136,7 @@ def index():
             </div>
             {% endfor %}
         {% else %}
-            <div class="empty-msg">Tidak ada jadwal pertandingan utama yang tersedia untuk rentang waktu ini.</div>
+            <div class="empty-msg">Data sedang disiapkan di latar belakang. Silakan refresh halaman ini dalam 1 menit ke depan.</div>
         {% endif %}
     </body>
     </html>
@@ -152,10 +145,15 @@ def index():
 
 @app.route("/force-update")
 def force_update():
-    """Endpoint untuk memicu pembaruan manual dengan timeout aman"""
+    """Langsung merespons instan tanpa menunggu proses AI selesai agar bebas dari Error 502"""
     try:
-        fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Hingga 5 data pertandingan berhasil diperbarui!"})
+        # Jalankan fungsi di latar belakang (Thread terpisah)
+        thread = threading.Thread(target=fetch_and_generate_predictions)
+        thread.start()
+        return jsonify({
+            "status": "success", 
+            "message": "Perintah diterima! Data sedang diperbarui di latar belakang. Silakan tunggu 1 menit lalu refresh halaman utama."
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
