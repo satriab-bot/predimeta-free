@@ -5,11 +5,9 @@ import requests
 from ddgs import DDGS
 from google import genai
 from flask import Flask, render_template_string, jsonify
-from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
-# Konfigurasi API Key secara aman dari Environment Variables Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 
@@ -18,9 +16,6 @@ DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
     """Fungsi utama untuk menarik jadwal dan mengolahnya via AI"""
-    print("Memulai proses otomatis penarikan jadwal dan prediksi...")
-    
-    # 1. Ambil jadwal dari football-data.org (misal untuk rentang hari ini)
     today = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     
@@ -32,19 +27,16 @@ def fetch_and_generate_predictions():
         data = response.json()
         matches = data.get("matches", [])
     except Exception as e:
-        print(f"Gagal mengambil jadwal: {e}")
         matches = []
         
     predictions_result = []
     
-    # Batasi proses maksimal 5 pertandingan pertama agar tidak terlalu lama/berat
     for match in matches[:5]:
         home_team = match['homeTeam']['name']
         away_team = match['awayTeam']['name']
         competition = match['competition']['name']
         match_time = match['utcDate']
         
-        # Cari data pendukung via DDGS (DuckDuckGo Search) untuk analisis kilat
         search_query = f"{home_team} vs {away_team} preview stats prediction 2026"
         context_data = ""
         try:
@@ -54,7 +46,6 @@ def fetch_and_generate_predictions():
         except Exception as e:
             context_data = "Data statistik tidak tersedia."
             
-        # Sintesis menggunakan Gemini AI (Main Pick + Reasoning singkat)
         ai_output = "Prediksi belum tersedia."
         if client:
             prompt = (
@@ -64,7 +55,7 @@ def fetch_and_generate_predictions():
             )
             try:
                 response = client.models.generate_content(
-                    model='gemini-3.5-flash-lite',
+                    model='gemini-2.5-flash',
                     contents=prompt
                 )
                 ai_output = response.text
@@ -79,7 +70,6 @@ def fetch_and_generate_predictions():
             "analysis": ai_output
         })
         
-    # Simpan hasil ke file JSON lokal
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "predictions": predictions_result
@@ -87,17 +77,9 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Prediksi harian berhasil diperbarui dan disimpan ke JSON!")
-
-# Inisialisasi Background Scheduler untuk jalan otomatis jam 10:30 WIB
-scheduler = BackgroundScheduler()
-# Menjadwalkan eksekusi setiap hari jam 10:30 (Waktu server Render UTC, atau sesuaikan)
-scheduler.add_job(func=fetch_and_generate_predictions, trigger="cron", hour=10, minute=30)
-scheduler.start()
 
 @app.route("/")
 def index():
-    """Halaman Web Tampilan Prediksi untuk disematkan di Blog"""
     predictions = []
     updated_at = "Belum pernah diperbarui"
     
@@ -110,7 +92,6 @@ def index():
         except:
             pass
             
-    # Tampilan HTML sederhana dan bersih untuk widget blog
     html_template = """
     <!DOCTYPE html>
     <html lang="id">
@@ -136,7 +117,7 @@ def index():
             </div>
             {% endfor %}
         {% else %}
-            <p style="font-size: 13px; color: #666;">Belum ada data prediksi hari ini. Sistem akan memperbarui secara otomatis pukul 10:30.</p>
+            <p style="font-size: 13px; color: #666;">Belum ada data prediksi. Silakan jalankan update manual.</p>
         {% endif %}
     </body>
     </html>
@@ -145,12 +126,12 @@ def index():
 
 @app.route("/force-update")
 def force_update():
-    """Endpoint rahasia untuk memaksa jalankan update sekarang juga tanpa nunggu jam 10:30"""
     try:
         fetch_and_generate_predictions()
-        return jsonify({"status": "success", "message": "Prediksi berhasil diperbarui secara manual!"})
+        return jsonify({"status": "success", "message": "Prediksi berhasil diperbarui!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    port
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
