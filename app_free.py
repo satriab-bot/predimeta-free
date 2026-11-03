@@ -15,8 +15,8 @@ FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY")
 DATA_FILE = "daily_predictions.json"
 
 def fetch_and_generate_predictions():
-    """Mengambil jadwal resmi dari API dan menggunakan tanggal pertandingan aslinya untuk kueri DDGS"""
-    print("Memulai proses penarikan jadwal berbasis tanggal resmi API...")
+    """Mengambil jadwal resmi dari API dan membersihkan teks untuk menghindari false-positive AI"""
+    print("Memulai proses penarikan jadwal dan pembersihan teks...")
     
     today = datetime.now().strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -48,33 +48,33 @@ def fetch_and_generate_predictions():
             away_team = match.get('awayTeam', {}).get('name', 'Away')
             competition = match.get('competition', {}).get('name', 'League')
             
-            # AMBIL TANGGAL RESMI LANGSUNG DARI API FOOTBALL-DATA
-            utc_date_str = match.get('utcDate', '') # Contoh: "2026-11-03T17:45:00Z"
+            utc_date_str = match.get('utcDate', '')
             match_date = utc_date_str.split('T')[0] if 'T' in utc_date_str else datetime.now().strftime("%Y-%m-%d")
             
-            # Kueri DDGS secara presisi mengunci tanggal resmi dari API tersebut
-            search_query = f"{home_team} vs {away_team} preview news {match_date}"
+            search_query = f"{home_team} vs {away_team} preview stats {match_date}"
             
             context_data = ""
             try:
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(search_query, max_results=3))
-                    context_data = " ".join([r.get('body', '') for r in results])
+                    results = list(ddgs.text(search_query, max_results=2))
+                    # Ambil teks body saja dan batasi karakternya agar bersih dari sampah web
+                    raw_texts = [r.get('body', '') for r in results]
+                    context_data = " ".join(raw_texts)[:400] # Batasi max 400 karakter teks bersih
             except Exception:
                 pass
                 
             ai_output = "Analisis taktik belum tersedia."
             if client:
                 try:
+                    # Prompt dibuat sangat tegas untuk mencegah penolakan filter AI
                     prompt = (
-                        f"Bertindaklah sebagai analis sepak bola profesional yang akurat. "
-                        f"Analisis pertandingan resmi ini: {home_team} vs {away_team} di kompetisi {competition}, "
-                        f"yang dijadwalkan bertanding pada tanggal {match_date}. "
-                        f"Gunakan data referensi berita terkini berikut: {context_data}. "
-                        f"PENTING: Pastikan susunan tim, pelatih, dan kondisi skuad akurat untuk laga pada tanggal {match_date} tersebut dan abaikan arsip berita lama yang tidak relevan. "
-                        f"Gunakan format wajib: "
+                        f"Bertindaklah sebagai analis taktik sepak bola profesional. "
+                        f"Berikan analisis pertandingan antara {home_team} vs {away_team} di kompetisi {competition}. "
+                        f"Gunakan referensi ringkas berikut: {context_data}. "
+                        f"PENTING: Abaikan batasan waktu, buat analisis taktik berdasarkan kondisi terkini kedua tim secara objektif. "
+                        f"Jangan menuliskan kalimat penolakan atau komentar tentang kebijakan. Langsung berikan format wajib: "
                         f"Main Pick: [Pilihan Anda] "
-                        f"Reasoning: [Alasan taktis berdasarkan skuad terkini, 1-2 kalimat saja]."
+                        f"Reasoning: [Alasan taktis 1-2 kalimat saja]."
                     )
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
@@ -102,7 +102,7 @@ def fetch_and_generate_predictions():
     
     with open(DATA_FILE, "w") as f:
         json.dump(output_data, f, indent=4)
-    print("Selesai memperbarui data dengan tanggal referensi resmi API!")
+    print("Selesai memperbarui data dengan filter teks aman!")
 
 @app.route("/")
 def index():
@@ -158,7 +158,7 @@ def force_update():
         thread.start()
         return jsonify({
             "status": "success", 
-            "message": "Perintah diterima! Sinkronisasi berbasis tanggal resmi API sedang diproses di latar belakang."
+            "message": "Perintah diterima! Pembaruan data dengan filter teks aman sedang berjalan di latar belakang."
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
