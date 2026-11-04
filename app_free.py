@@ -163,7 +163,7 @@ def index():
                 <div class="analysis">{{ p.analysis | safe }}</div>
             </div>
             {% endfor %}
-            <div style="font-size: 10px; text-align: center; color: #777; margin-top: 15px;">
+            <div style="font-size: 20px; text-align: center; color: #777; margin-top: 15px;">
                 Ingin analisis taktik mendalam untuk lebih banyak pertandingan? <br>Silakan berlangganan <b>PrediMeta Premium</b>! 🚀
             </div>
         {% else %}
